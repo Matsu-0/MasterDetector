@@ -268,7 +268,7 @@ public class Assist {
 			ArrayList<Double> truth = new ArrayList<Double>();
 			TimePointN tp;
 			int j = 0;
-			// vals[1]-vals[n]是value，vals[n+1]-vals[2n]truth
+			// vals[1]-vals[n] are values, vals[n+1]-vals[2n] are truth
 			while ((line = br.readLine()) != null && j < size) {
 				String[] vals = line.split(splitOp);
 				value = new ArrayList<Double>();
@@ -1686,7 +1686,7 @@ public class Assist {
 			indexlist.add(index);
 			
 			for(int j=0; j<n; j++){
-				// 全局最大最小
+				// global min/max
 				noise = random.nextDouble(); // [0.0-1.0]
 				noiseLen = noiseMinMax.get(1+j*2) - noiseMinMax.get(j*2);
 				if (noise == 0)

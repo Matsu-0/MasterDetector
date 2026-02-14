@@ -1,13 +1,18 @@
 package Algorithm;
 
+import Algorithm.util.TimeSeriesPredictor;
 import Algorithm.util.VARUtil;
 
 import java.util.ArrayList;
 
 public class AnomalyDetector {
     public static boolean[] detect(double[][] td_repaired, int p, double beta) {
+        return detect(td_repaired, p, beta, new VARUtil(p));
+    }
+    
+    public static boolean[] detect(double[][] td_repaired, int p, double beta, TimeSeriesPredictor predictor) {
         int columnCnt = td_repaired[0].length;
-        VARUtil prediction_model = new VARUtil(columnCnt);
+        TimeSeriesPredictor prediction_model = predictor;
         prediction_model.fit(listToArray(td_repaired));
         boolean[] anomalies = new boolean[td_repaired.length];
         for (int i = 0; i < p; i++) {

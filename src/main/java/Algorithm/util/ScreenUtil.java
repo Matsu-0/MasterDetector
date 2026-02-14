@@ -153,7 +153,7 @@ public class ScreenUtil {
 
     private void local(ArrayList<Pair<Long, Double>> list, int index) {
         double mid = getMedian(list, index);
-        // 计算x_k'
+        // compute x_k'
         if (index == 0) {
             list.set(index, new Pair<>(list.get(index).getKey(), mid));
         } else {

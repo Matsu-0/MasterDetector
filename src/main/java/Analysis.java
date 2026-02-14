@@ -67,6 +67,10 @@ public class Analysis {
     public String getRMSE() {
         return String.format("%.3f", this.RMSE);
     }
+    
+    public double getRMSEValue() {
+        return this.RMSE;
+    }
 
     public String getPrecision() {
         return String.format("%.3f", this.precision);

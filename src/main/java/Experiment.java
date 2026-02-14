@@ -1,5 +1,7 @@
 import Algorithm.*;
 import Algorithm.util.KDTreeUtil;
+import Algorithm.util.DLinearUtil;
+import Algorithm.util.PatchTSTUtil;
 
 import java.io.*;
 import java.text.SimpleDateFormat;
@@ -9,6 +11,10 @@ import java.util.Date;
 import java.util.Scanner;
 
 public class Experiment {
+    // data path configuration; change to your data directory if needed
+    static String DATA_BASE_PATH = "./data/";  // base path for input data
+    static String OUTPUT_BASE_PATH = "./model/data/";  // base path for output
+    
     // input
     static String td_path;
     static String md_path;
@@ -30,8 +36,8 @@ public class Experiment {
 
     public static void init(int dataset_idx) {
         if (dataset_idx == 0) {
-            td_path = "./data/engine/time_series_data_1596148.csv";
-            md_path = "./data/engine/master_data_14756.csv";
+            td_path = DATA_BASE_PATH + "engine/time_series_data_1596148.csv";
+            md_path = DATA_BASE_PATH + "engine/master_data_14756.csv";
             td_len = 600 * 1000;
             md_len = 20000;
 
@@ -39,8 +45,8 @@ public class Experiment {
             error_range = 3.0;
             error_length = 5;
         } else if (dataset_idx == 1) {
-            td_path = "./data/gps/time_series_data_1166375.csv";
-            md_path = "./data/gps/master_data_92110.csv";
+            td_path = DATA_BASE_PATH + "gps/time_series_data_1166375.csv";
+            md_path = DATA_BASE_PATH + "gps/master_data_92110.csv";
             td_len = 200 * 1000;
             md_len = 80000;
 
@@ -48,8 +54,8 @@ public class Experiment {
             error_range = 0.8;
             error_length = 5;
         } else if (dataset_idx == 2) {
-            td_path = "./data/road/time_series_data_1829660.csv";
-            md_path = "./data/road/master_data_66876.csv";
+            td_path = DATA_BASE_PATH + "road/time_series_data_1829660.csv";
+            md_path = DATA_BASE_PATH + "road/master_data_66876.csv";
             td_len = 300 * 1000;
             md_len = 6000;
 
@@ -57,8 +63,8 @@ public class Experiment {
             error_range = 3.0;
             error_length = 5;
         } else if (dataset_idx == 3) {
-            td_path = "./data/weather/time_series_data_390598.csv";
-            md_path = "./data/weather/master_data_524288.csv";
+            td_path = DATA_BASE_PATH + "weather/time_series_data_390598.csv";
+            md_path = DATA_BASE_PATH + "weather/master_data_524288.csv";
             td_len = 30 * 1000;
             md_len = 6000;
 
@@ -66,8 +72,8 @@ public class Experiment {
             error_range = 3.0;
             error_length = 5;
         } else {
-            td_path = "./data/traj/time_series_data_25168.csv";
-            md_path = "./data/traj/master_data_1180.csv";
+            td_path = DATA_BASE_PATH + "traj/time_series_data_25168.csv";
+            md_path = DATA_BASE_PATH + "traj/master_data_1180.csv";
             td_len = 25 * 1000;
             md_len = 1200;
 
@@ -95,6 +101,22 @@ public class Experiment {
 //        saveTrajectory(td_repair);
         long cost_time = masterRepair.getCost_time();
         boolean[] detect_repair = AnomalyDetector.detect(td_repair, p, beta);
+        return new Analysis(td_time, td_clean, td_repair, td_bool, cost_time, detect_clean, detect_repair);
+    }
+
+    public static Analysis masterRepairDLinear(KDTreeUtil kdTree, long[] td_time, double[][] td_clean, double[][] td_dirty, boolean[] td_bool, boolean[] detect_clean) {
+        System.out.println("\nMasterRepair (DLinear)");
+        int columnCnt = td_clean[0].length;
+        // create DLinear model
+        DLinearUtil dlinearModel = new DLinearUtil(p, columnCnt);
+        // create MasterDetector with DLinear model
+        MasterDetector masterRepair = new MasterDetector(td_dirty, kdTree, td_time, columnCnt, k, p, eta, dlinearModel);
+        double[][] td_repair = masterRepair.getTd_repaired();
+        double regression_loss = masterRepair.getRegression_loss();
+//        saveTrajectory(td_repair);
+        long cost_time = masterRepair.getCost_time();
+        // run anomaly detection with DLinear model
+        boolean[] detect_repair = AnomalyDetector.detect(td_repair, p, beta, dlinearModel);
         return new Analysis(td_time, td_clean, td_repair, td_bool, cost_time, detect_clean, detect_repair);
     }
 
@@ -180,14 +202,18 @@ public class Experiment {
 
     public static void main(String[] args) throws Exception {
         starts();
-        main_td_scale();
+        
+        // other experiments (commented out; enable as needed)
+//        main_td_scale();
 //        main_md_scale();
 //        main_error_rate();
 //        main_error_range();
 //        main_error_length();
 //        main_parameters(false, true, false, false);
 //        whole_data_set(4);
-//        varyingModel(5);
+        varyingModel(5);  // VAR model experiment
+        // varyingModelDLinear(5);
+//        varyingModelPatchTST(5);
     }
 
 
@@ -201,14 +227,31 @@ public class Experiment {
         recordFile("\n" + current_time + "\n", "Time");
         recordFile("\n" + current_time + "\n", "RegressionLoss");
     }
+    
+    /**
+     * Clear result files (optional; use when starting a new experiment).
+     * Note: this removes all previous results.
+     */
+    public static void clearResults() throws Exception {
+        String[] types = {"RMSE", "Precision", "Recall", "Time", "RegressionLoss"};
+        for (String type : types) {
+            File resultFile = new File("./results/exp" + type + ".txt");
+            if (resultFile.exists()) {
+                try (FileWriter fw = new FileWriter(resultFile, false)) {
+                    fw.write("");  // clear content (false = overwrite mode)
+                }
+                System.out.println("Cleared results file: exp" + type + ".txt");
+            }
+        }
+    }
 
     public static void varyingModel(int error_rate) throws Exception {
-        recordFile("\nERROR RATE " + error_rate + "\n", "RMSE");
-        recordFile("\nERROR RATE " + error_rate + "\n", "Time");
-        recordFile("\nERROR RATE " + error_rate + "\n", "Precision");
-        recordFile("\nERROR RATE " + error_rate + "\n", "Recall");
-        recordFile("\nERROR RATE " + error_rate + "\n", "RegressionLoss");
-        String data_csv_path = "./model/data/";
+        recordFile("\nERROR RATE " + error_rate + " (VAR)\n", "RMSE");
+        recordFile("\nERROR RATE " + error_rate + " (VAR)\n", "Time");
+        recordFile("\nERROR RATE " + error_rate + " (VAR)\n", "Precision");
+        recordFile("\nERROR RATE " + error_rate + " (VAR)\n", "Recall");
+        recordFile("\nERROR RATE " + error_rate + " (VAR)\n", "RegressionLoss");
+        String data_csv_path = OUTPUT_BASE_PATH;
         String[] datasets = {"engine", "gps", "road", "weather", "traj"};
         for (int dataset_idx = 0; dataset_idx < 5; dataset_idx++) {
             String file_path = data_csv_path + datasets[dataset_idx] + "/";
@@ -248,6 +291,7 @@ public class Experiment {
             recordFile("\n" + datasets[dataset_idx] + ",", "RegressionLoss");
 
             System.out.println("\nMasterRepair");
+            System.out.println("Dataset: " + datasets[dataset_idx]);
             int columnCnt = td_clean[0].length;
             MasterDetector masterRepair = new MasterDetector(td_dirty, kdTree, td_time, columnCnt, k, p, eta);
             double[][] td_repair_mr = masterRepair.getTd_repaired();
@@ -257,11 +301,267 @@ public class Experiment {
             boolean[] detect_repair = AnomalyDetector.detect(td_repair_mr, p, beta);
             Analysis analysis = new Analysis(td_time, td_clean, td_repair_mr, td_bool, cost_time, detect_clean, detect_repair);
             double regression_loss = masterRepair.getRegression_loss();
+            
+            // print results to console
+            System.out.println("Results for " + datasets[dataset_idx] + ":");
+            System.out.println("  RMSE: " + analysis.getRMSE());
+            System.out.println("  Precision: " + analysis.getPrecision());
+            System.out.println("  Recall: " + analysis.getRecall());
+            System.out.println("  Time: " + analysis.getCost_time() + " ms");
+            System.out.println("  Regression Loss: " + regression_loss);
+            
             recordFile(analysis.getRMSE() + ",", "RMSE");
             recordFile(analysis.getPrecision() + ",", "Precision");
             recordFile(analysis.getRecall() + ",", "Recall");
             recordFile(analysis.getCost_time() + ",", "Time");
             recordFile(regression_loss + ",", "RegressionLoss");
+
+            System.gc();
+            Runtime.getRuntime().gc();
+        }
+    }
+
+    public static void varyingModelPatchTST(int error_rate) throws Exception {
+        recordFile("\nERROR RATE " + error_rate + " (PatchTST)\n", "RMSE");
+        recordFile("\nERROR RATE " + error_rate + " (PatchTST)\n", "Time");
+        recordFile("\nERROR RATE " + error_rate + " (PatchTST)\n", "Precision");
+        recordFile("\nERROR RATE " + error_rate + " (PatchTST)\n", "Recall");
+        recordFile("\nERROR RATE " + error_rate + " (PatchTST)\n", "RegressionLoss");
+        String data_csv_path = OUTPUT_BASE_PATH;
+        String[] datasets = {"engine", "gps", "road", "weather", "traj"};
+        for (int dataset_idx = 0; dataset_idx < 5; dataset_idx++) {
+            String file_path = data_csv_path + datasets[dataset_idx] + "/";
+            File directory = new File(file_path);
+            if (!directory.exists()) {
+                directory.mkdirs();
+            }
+
+            init(dataset_idx);
+
+            LoadData loadData = new LoadData(td_path, md_path, td_len, md_len, eta, seed);
+            long[] td_time = loadData.getTd_time();
+            String [] td_time_str = loadData.getTd_time_str();
+            double[][] td_clean = loadData.getTd_clean();
+            double[][] md = loadData.getMd();
+            KDTreeUtil kdTree = loadData.getKdTree();
+            KDTreeUtil kdTreeComplete = loadData.getKdTreeComplete();
+//            System.out.println(Arrays.toString(td_time));
+            writeDataToCSV(td_time_str, td_clean, file_path + "clean_t.csv");
+
+            // detect ground truth
+            boolean[] detect_clean = AnomalyDetector.detect(td_clean, p, beta);
+
+            // add noise
+            AddNoise addNoise = new AddNoise(td_clean, error_rate, error_range, error_length, eta, kdTreeComplete, seed);
+            double[][] td_dirty = addNoise.getTd_dirty();
+            writeDataToCSV(td_time_str, td_dirty, file_path + "dirty_" + error_rate + "_t.csv");
+
+            // label4imr
+            LabelData labelData = new LabelData(td_clean, td_dirty, label_rate, seed);
+            boolean[] td_bool = labelData.getTd_bool();
+
+            recordFile("\n" + datasets[dataset_idx] + ",", "RMSE");
+            recordFile("\n" + datasets[dataset_idx] + ",", "Precision");
+            recordFile("\n" + datasets[dataset_idx] + ",", "Recall");
+            recordFile("\n" + datasets[dataset_idx] + ",", "Time");
+            recordFile("\n" + datasets[dataset_idx] + ",", "RegressionLoss");
+
+            System.out.println("\nMasterRepair (PatchTST)");
+            System.out.println("Dataset: " + datasets[dataset_idx]);
+            int columnCnt = td_clean[0].length;
+            try {
+                // create PatchTST model
+                System.out.println("[Experiment] Creating PatchTST model for dataset: " + datasets[dataset_idx]);
+                PatchTSTUtil patchTSTModel = new PatchTSTUtil(p, columnCnt);
+                // create MasterDetector with PatchTST model
+                System.out.println("[Experiment] Starting MasterDetector repair process...");
+                MasterDetector masterRepair = new MasterDetector(td_dirty, kdTree, td_time, columnCnt, k, p, eta, patchTSTModel);
+                System.out.println("[Experiment] Repair process completed successfully");
+                
+                double[][] td_repair_mr = masterRepair.getTd_repaired();
+                writeDataToCSV(td_time_str, td_repair_mr, file_path + "PatchTST_t.csv");
+                System.out.println("[Experiment] Repaired data written to CSV");
+
+                long cost_time = masterRepair.getCost_time();
+                // run anomaly detection with PatchTST model
+                System.out.println("[Experiment] Starting anomaly detection on repaired data...");
+                boolean[] detect_repair = AnomalyDetector.detect(td_repair_mr, p, beta, patchTSTModel);
+                System.out.println("[Experiment] Anomaly detection completed");
+                
+                System.out.println("[Experiment] Creating Analysis object...");
+                Analysis analysis = new Analysis(td_time, td_clean, td_repair_mr, td_bool, cost_time, detect_clean, detect_repair);
+                double regression_loss = masterRepair.getRegression_loss();
+                
+                // print results for debugging
+                System.out.println("[Experiment] Results for " + datasets[dataset_idx] + ":");
+                System.out.println("  RMSE: " + analysis.getRMSE());
+                System.out.println("  Precision: " + analysis.getPrecision());
+                System.out.println("  Recall: " + analysis.getRecall());
+                System.out.println("  Time: " + analysis.getCost_time() + " ms");
+                System.out.println("  Regression Loss: " + regression_loss);
+                
+                // write results to files
+                System.out.println("[Experiment] Writing results to files...");
+                recordFile(analysis.getRMSE() + ",", "RMSE");
+                recordFile(analysis.getPrecision() + ",", "Precision");
+                recordFile(analysis.getRecall() + ",", "Recall");
+                recordFile(analysis.getCost_time() + ",", "Time");
+                recordFile(regression_loss + ",", "RegressionLoss");
+                System.out.println("[Experiment] Results written successfully");
+            } catch (Exception e) {
+                System.err.println("[Experiment] Error processing dataset " + datasets[dataset_idx] + ":");
+                e.printStackTrace();
+                // write placeholder on error to keep file format consistent
+                recordFile("ERROR,", "RMSE");
+                recordFile("ERROR,", "Precision");
+                recordFile("ERROR,", "Recall");
+                recordFile("ERROR,", "Time");
+                recordFile("ERROR,", "RegressionLoss");
+                throw e;  // rethrow for debugging
+            }
+
+            System.gc();
+            Runtime.getRuntime().gc();
+        }
+    }
+
+    public static void varyingModelDLinear(int error_rate) throws Exception {
+        recordFile("\nERROR RATE " + error_rate + " (DLinear)\n", "RMSE");
+        recordFile("\nERROR RATE " + error_rate + " (DLinear)\n", "Time");
+        recordFile("\nERROR RATE " + error_rate + " (DLinear)\n", "Precision");
+        recordFile("\nERROR RATE " + error_rate + " (DLinear)\n", "Recall");
+        recordFile("\nERROR RATE " + error_rate + " (DLinear)\n", "RegressionLoss");
+        String data_csv_path = OUTPUT_BASE_PATH;
+        String[] datasets = {"engine", "gps", "road", "weather", "traj"};
+        for (int dataset_idx = 0; dataset_idx < 5; dataset_idx++) {
+            String file_path = data_csv_path + datasets[dataset_idx] + "/";
+            File directory = new File(file_path);
+            if (!directory.exists()) {
+                directory.mkdirs();
+            }
+
+            init(dataset_idx);
+
+            LoadData loadData = new LoadData(td_path, md_path, td_len, md_len, eta, seed);
+            long[] td_time = loadData.getTd_time();
+            String [] td_time_str = loadData.getTd_time_str();
+            double[][] td_clean = loadData.getTd_clean();
+            double[][] md = loadData.getMd();
+            KDTreeUtil kdTree = loadData.getKdTree();
+            KDTreeUtil kdTreeComplete = loadData.getKdTreeComplete();
+//            System.out.println(Arrays.toString(td_time));
+            writeDataToCSV(td_time_str, td_clean, file_path + "clean_t.csv");
+
+            // detect ground truth
+            boolean[] detect_clean = AnomalyDetector.detect(td_clean, p, beta);
+
+            // add noise
+            AddNoise addNoise = new AddNoise(td_clean, error_rate, error_range, error_length, eta, kdTreeComplete, seed);
+            double[][] td_dirty = addNoise.getTd_dirty();
+            writeDataToCSV(td_time_str, td_dirty, file_path + "dirty_" + error_rate + "_t.csv");
+
+            // label4imr
+            LabelData labelData = new LabelData(td_clean, td_dirty, label_rate, seed);
+            boolean[] td_bool = labelData.getTd_bool();
+
+            recordFile("\n" + datasets[dataset_idx] + ",", "RMSE");
+            recordFile("\n" + datasets[dataset_idx] + ",", "Precision");
+            recordFile("\n" + datasets[dataset_idx] + ",", "Recall");
+            recordFile("\n" + datasets[dataset_idx] + ",", "Time");
+            recordFile("\n" + datasets[dataset_idx] + ",", "RegressionLoss");
+
+            System.out.println("\nMasterRepair (DLinear)");
+            int columnCnt = td_clean[0].length;
+            try {
+                // create DLinear model
+                System.out.println("[Experiment] Creating DLinear model for dataset: " + datasets[dataset_idx]);
+                DLinearUtil dlinearModel = new DLinearUtil(p, columnCnt);
+                // create MasterDetector with DLinear model
+                System.out.println("[Experiment] Starting MasterDetector repair process...");
+                MasterDetector masterRepair = new MasterDetector(td_dirty, kdTree, td_time, columnCnt, k, p, eta, dlinearModel);
+                System.out.println("[Experiment] Repair process completed successfully");
+                
+                // get prediction and repair results
+                double[][] td_prediction = masterRepair.getTd_prediction();
+                double[][] td_repair_mr = masterRepair.getTd_repaired();
+                
+                // save prediction to CSV
+                writeDataToCSV(td_time_str, td_prediction, file_path + "DLinear_prediction_t.csv");
+                System.out.println("[Experiment] Prediction data written to CSV");
+                
+                // save repair result to CSV
+                writeDataToCSV(td_time_str, td_repair_mr, file_path + "DLinear_t.csv");
+                System.out.println("[Experiment] Repaired data written to CSV");
+
+                // get timing info
+                long prediction_time = masterRepair.getPrediction_time();
+                long master_repair_time = masterRepair.getMaster_repair_time();
+                long total_time = masterRepair.getTotal_repair_time();
+                
+                // run anomaly detection with DLinear on prediction
+                System.out.println("[Experiment] Starting anomaly detection on prediction data...");
+                boolean[] detect_prediction = AnomalyDetector.detect(td_prediction, p, beta, dlinearModel);
+                System.out.println("[Experiment] Anomaly detection on prediction completed");
+                
+                // run anomaly detection with DLinear on repair
+                System.out.println("[Experiment] Starting anomaly detection on repaired data...");
+                boolean[] detect_repair = AnomalyDetector.detect(td_repair_mr, p, beta, dlinearModel);
+                System.out.println("[Experiment] Anomaly detection on repaired data completed");
+                
+                // compute RMSE and timing for prediction
+                System.out.println("[Experiment] Calculating RMSE for prediction values...");
+                Analysis analysis_prediction = new Analysis(td_time, td_clean, td_prediction, td_bool, prediction_time, detect_clean, detect_prediction);
+                // regression loss from MasterDetector (same logic as repair)
+                double regression_loss_prediction = masterRepair.getPrediction_regression_loss();
+                
+                // compute RMSE and timing for repair
+                System.out.println("[Experiment] Calculating RMSE for repaired values...");
+                Analysis analysis_repair = new Analysis(td_time, td_clean, td_repair_mr, td_bool, total_time, detect_clean, detect_repair);
+                // regression loss from MasterDetector
+                double regression_loss = masterRepair.getRegression_loss();
+                
+                // print results
+                System.out.println("[Experiment] Results for " + datasets[dataset_idx] + " (Prediction only):");
+                System.out.println("  RMSE: " + analysis_prediction.getRMSE());
+                System.out.println("  Precision: " + analysis_prediction.getPrecision());
+                System.out.println("  Recall: " + analysis_prediction.getRecall());
+                System.out.println("  Time: " + prediction_time + " ms");
+                System.out.println("  Regression Loss: " + regression_loss_prediction);
+                
+                System.out.println("[Experiment] Results for " + datasets[dataset_idx] + " (Prediction + Master Repair):");
+                System.out.println("  RMSE: " + analysis_repair.getRMSE());
+                System.out.println("  Precision: " + analysis_repair.getPrecision());
+                System.out.println("  Recall: " + analysis_repair.getRecall());
+                System.out.println("  Time: " + total_time + " ms (prediction: " + prediction_time + " ms, master repair: " + master_repair_time + " ms)");
+                System.out.println("  Regression Loss: " + regression_loss);
+                
+                // write results (prediction)
+                System.out.println("[Experiment] Writing prediction results to files...");
+                recordFile(analysis_prediction.getRMSE() + ",", "RMSE");
+                recordFile(analysis_prediction.getPrecision() + ",", "Precision");
+                recordFile(analysis_prediction.getRecall() + ",", "Recall");
+                recordFile(prediction_time + ",", "Time");
+                recordFile(regression_loss_prediction + ",", "RegressionLoss");
+                
+                // write results (repair)
+                System.out.println("[Experiment] Writing repair results to files...");
+                recordFile(analysis_repair.getRMSE() + ",", "RMSE");
+                recordFile(analysis_repair.getPrecision() + ",", "Precision");
+                recordFile(analysis_repair.getRecall() + ",", "Recall");
+                recordFile(total_time + ",", "Time");
+                recordFile(regression_loss + ",", "RegressionLoss");
+                System.out.println("[Experiment] Results written successfully");
+            } catch (Exception e) {
+                System.err.println("[Experiment] Error processing dataset " + datasets[dataset_idx] + ":");
+                e.printStackTrace();
+                // write placeholder on error to keep file format consistent
+                recordFile("ERROR,", "RMSE");
+                recordFile("ERROR,", "Precision");
+                recordFile("ERROR,", "Recall");
+                recordFile("ERROR,", "Time");
+                recordFile("ERROR,", "RegressionLoss");
+                throw e;  // rethrow for debugging
+            }
 
             System.gc();
             Runtime.getRuntime().gc();
@@ -322,8 +622,8 @@ public class Experiment {
         recordFile("\nLSTM ERROR RATE " + error_rate + "\n", "Precision");
         recordFile("\nLSTM ERROR RATE " + error_rate + "\n", "Recall");
 
-        String data_csv_path = "./LSTM/repaired_data/";
-        String clean_file_path = "./model/data/";
+        String data_csv_path = OUTPUT_BASE_PATH + "../LSTM/repaired_data/";
+        String clean_file_path = OUTPUT_BASE_PATH;
         String[] datasets = {"engine", "gps", "road", "weather", "traj"};
         for (int dataset_idx = 0; dataset_idx < 5; dataset_idx++) {
             String file_path = data_csv_path + datasets[dataset_idx] + "_" + String.valueOf(error_rate) + ".csv";
@@ -374,16 +674,16 @@ public class Experiment {
 
     public static void get_data_repaired(int rate) throws Exception {
         error_rate = rate;
-        String data_csv_path = "./data/error_rate_" + String.valueOf(rate) + "/";
+        String data_csv_path = DATA_BASE_PATH + "error_rate_" + String.valueOf(rate) + "/";
         String[] datasets = {"engine", "gps", "road", "weather", "traj"};
         for (int dataset_idx = 4; dataset_idx < 5; dataset_idx++) {
             String file_path = data_csv_path + datasets[dataset_idx] + "/";
-            // 创建File对象
+            // create File for directory
             File directory = new File(file_path);
 
-            // 判断文件夹是否存在
+            // check if directory exists
             if (!directory.exists()) {
-                // 文件夹不存在，创建文件夹
+                // create directory if it does not exist
                 directory.mkdirs();
             }
             init(dataset_idx);

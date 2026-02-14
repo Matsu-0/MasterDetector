@@ -1,0 +1,8 @@
+*.zip
+
+*fig/
+data/
+*results/
+*models/
+*model/
+*target/

@@ -50,7 +50,7 @@ public class LoadData {
         this.loadTimeSeriesData(td_path);
     }
 
-    private void loadMasterDataComplete(String filename) throws Exception {  // 全随机采样master
+    private void loadMasterDataComplete(String filename) throws Exception {  // full random sample master
         Scanner sc = new Scanner(new File(filename));
         sc.useDelimiter("\\s*([,\\r\\n])\\s*"); // set separator
         sc.nextLine();
@@ -67,7 +67,7 @@ public class LoadData {
 //        standardization(md_array_complete);
     }
 
-    private void loadMasterData(String filename) throws Exception {  // 全随机采样master
+    private void loadMasterData(String filename) throws Exception {  // full random sample master
         Scanner sc = new Scanner(new File(filename));
         sc.useDelimiter("\\s*([,\\r\\n])\\s*"); // set separator
         sc.nextLine();

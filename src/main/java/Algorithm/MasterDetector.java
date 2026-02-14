@@ -2,6 +2,7 @@ package Algorithm;
 
 
 import Algorithm.util.KDTreeUtil;
+import Algorithm.util.TimeSeriesPredictor;
 import Algorithm.util.VARUtil;
 
 import java.util.ArrayList;
@@ -9,9 +10,9 @@ import java.util.ArrayList;
 public class MasterDetector {
     private final double[][] td;
     private double[][] td_repaired;
+    private double[][] td_prediction;  // store predicted values
     private boolean[] td_anomalies;
     //    private boolean[] anomalies_in_repaired;
-//    private double[][] td_prediction;
     private final KDTreeUtil kdTreeUtil;
     private final long[] td_time;
     private final int columnCnt;
@@ -20,15 +21,24 @@ public class MasterDetector {
     private double[] std;
     private int[] initial_window;
     private double regression_loss;
+    private double prediction_regression_loss;  // regression loss of predictions
+    private int n_repair_loss_count;    // count of repair loss accumulations, for normalization
+    private int n_prediction_loss_count;  // count of prediction loss accumulations, for normalization
 
-    private VARUtil prediction_model;
+    private TimeSeriesPredictor prediction_model;
 
     private final int n;
 
     private double eta;
     private final long cost_time;
+    private long prediction_time;  // time spent in prediction phase
+    private long master_repair_time;  // time spent in master data repair phase
 
     public MasterDetector(double[][] td, KDTreeUtil kdTreeUtil, long[] td_time, int columnCnt, int k, int p, double eta) {
+        this(td, kdTreeUtil, td_time, columnCnt, k, p, eta, new VARUtil(columnCnt));
+    }
+    
+    public MasterDetector(double[][] td, KDTreeUtil kdTreeUtil, long[] td_time, int columnCnt, int k, int p, double eta, TimeSeriesPredictor predictor) {
         this.td = td;
         this.kdTreeUtil = kdTreeUtil;
         this.td_time = td_time;
@@ -37,12 +47,13 @@ public class MasterDetector {
         this.p = p;
         this.eta = eta;
         this.n = td.length;
+        this.prediction_model = predictor;
         long startTime = System.currentTimeMillis();
 //        this.testModelOnly(0.8);
         this.repair();
         long endTime = System.currentTimeMillis();
         this.cost_time = endTime - startTime;
-        System.out.println("MasterRepair time cost:" + cost_time + "ms");
+        System.out.println("MasterRepair time cost:" + cost_time + "ms (prediction: " + prediction_time + "ms, master repair: " + master_repair_time + "ms)");
     }
 
     //    public double delta(double[] t_tuple, double[] m_tuple) {
@@ -152,7 +163,10 @@ public class MasterDetector {
 //                right = i + 1;
 //            }
         }
-        this.prediction_model = new VARUtil(columnCnt);
+        // if prediction_model is not initialized, use default VAR model
+        if (this.prediction_model == null) {
+            this.prediction_model = new VARUtil(columnCnt);
+        }
         this.prediction_model.fit(learning_samples);
     }
 
@@ -185,16 +199,24 @@ public class MasterDetector {
         System.arraycopy(data, i - p, W, 0, p);
         return W;
     }
-
-    public void forwardRepairing(int p) {
+public void forwardRepairing(int p) {
         int i = initial_window[1] + 1;
 
         while (i < n) {
             if (td_anomalies[i] == Boolean.TRUE) {
                 double[][] W_repaired = getWindow(this.td_repaired, i, p);
+                
+                // prediction phase (record time)
+                long predStart = System.currentTimeMillis();
                 double[] x_repaired_predicted = arrayToList(prediction_model.predict(W_repaired));
-//                double[][] W_prediction = getWindow(this.td_prediction, i, p);
-//                double[] x_predicted = arrayToList(prediction_model.predict(W_prediction));
+                long predEnd = System.currentTimeMillis();
+                prediction_time += (predEnd - predStart);
+                
+                // store predicted value
+                this.td_prediction[i] = x_repaired_predicted.clone();
+                
+                // master data repair phase (record time)
+                long repairStart = System.currentTimeMillis();
                 double[][] candidates =
                         this.kdTreeUtil.kNearestNeighbors(x_repaired_predicted, this.k);
                 //        find the optimal repair
@@ -206,17 +228,19 @@ public class MasterDetector {
                         optimal_repair = candidate;
                     }
                 }
+                long repairEnd = System.currentTimeMillis();
+                master_repair_time += (repairEnd - repairStart);
+                
                 this.td_repaired[i] = optimal_repair;
                 regression_loss += delta(optimal_repair, x_repaired_predicted);
+                prediction_regression_loss += delta(x_repaired_predicted, td[i]);
+                n_repair_loss_count++;
+                n_prediction_loss_count++;
             } else {
-//                this.td_prediction[i] = td[i];
+                // normal point: predicted value equals original value
+                this.td_prediction[i] = td[i].clone();
                 this.td_repaired[i] = td[i];
             }
-//            if (delta(x_repaired_predicted, optimal_repair) > beta) {
-//                this.anomalies_in_repaired[i] = Boolean.TRUE;
-//            } else {
-//                this.anomalies_in_repaired[i] = Boolean.FALSE;
-//            }
             i++;
         }
     }
@@ -231,14 +255,17 @@ public class MasterDetector {
         while (i >= 0) {
             if (td_anomalies[i] == Boolean.TRUE) {
                 double[] optimal_repair = new double[columnCnt];
-//                double[] optimal_prediction_repair = new double[columnCnt];
                 double[][] candidates =
                         this.kdTreeUtil.kNearestNeighbors(this.td_repaired[i + 1], k);
                 double[][] W_repaired = getWindow(this.td_repaired, i + p, p);
                 double[] x_repaired = this.td_repaired[i];
-//        find the optimal repair
+                
+                // prediction phase (record time)
+                long predStart = System.currentTimeMillis();
                 double min_dis = Double.MAX_VALUE;
                 double regression_loss_delta = 0.0;
+                double[] best_prediction = null;
+                
                 for (double[] candidate : candidates) {
                     W_repaired[0] = candidate;
                     double[] x_repaired_predicted = arrayToList(prediction_model.predict(W_repaired));
@@ -246,32 +273,49 @@ public class MasterDetector {
                     if (delta(x_repaired_predicted, x_repaired) < min_dis) {
                         min_dis = delta(x_repaired_predicted, x_repaired);
                         regression_loss_delta = min_dis;
-//                        optimal_prediction_repair = x_repaired_predicted;
                         optimal_repair = candidate;
+                        best_prediction = x_repaired_predicted.clone();
                     }
                 }
+                long predEnd = System.currentTimeMillis();
+                prediction_time += (predEnd - predStart);
+                
+                // store predicted value
+                if (best_prediction != null) {
+                    this.td_prediction[i] = best_prediction;
+                }
+                
+                // master data repair phase (record time)
+                long repairStart = System.currentTimeMillis();
+                // candidate search already done in prediction phase; here we mainly select the best value
+                long repairEnd = System.currentTimeMillis();
+                master_repair_time += (repairEnd - repairStart);
+                
                 this.td_repaired[i] = optimal_repair;
                 this.regression_loss += regression_loss_delta;
-//                this.td_prediction[i] = ;
+                if (best_prediction != null) {
+                    prediction_regression_loss += delta(best_prediction, td[i]);
+                    n_prediction_loss_count++;
+                }
+                n_repair_loss_count++;
             } else {
-//                optimal_repair = td[i];
-//                this.td_prediction[i] = optimal_repair;
+                // normal point: predicted value equals original value
+                this.td_prediction[i] = td[i].clone();
                 this.td_repaired[i] = td[i];
             }
-
-//            if (delta(optimal_prediction_repair, td[i + p]) > beta) {
-//                this.anomalies_in_repaired[i] = Boolean.TRUE;
-//            } else {
-//                this.anomalies_in_repaired[i] = Boolean.FALSE;
-//            }
             i--;
         }
     }
 
     public void initList() {
         this.regression_loss = 0.0;
-//        td_prediction = new double[n][columnCnt];
+        this.prediction_regression_loss = 0.0;
+        this.n_repair_loss_count = 0;
+        this.n_prediction_loss_count = 0;
+        td_prediction = new double[n][columnCnt];
         td_repaired = new double[n][columnCnt];
+        this.prediction_time = 0;
+        this.master_repair_time = 0;
 //        anomalies_in_repaired = new boolean[n];
     }
 
@@ -306,7 +350,10 @@ public class MasterDetector {
             }
             learning_samples.add(sample);
         }
-        this.prediction_model = new VARUtil(columnCnt);
+        // if prediction_model is not initialized, use default VAR model
+        if (this.prediction_model == null) {
+            this.prediction_model = new VARUtil(columnCnt);
+        }
         this.prediction_model.fit(learning_samples);
 
         for (int i = train_window; i < td.length; i++) {
@@ -344,6 +391,10 @@ public class MasterDetector {
     public double[][] getTd_repaired() {
         return td_repaired;
     }
+    
+    public double[][] getTd_prediction() {
+        return td_prediction;
+    }
 
 //    public boolean[] getAnomalies_in_repaired() {
 //        return anomalies_in_repaired;
@@ -352,8 +403,34 @@ public class MasterDetector {
     public long getCost_time() {
         return cost_time;
     }
+    
+    public long getPrediction_time() {
+        return prediction_time;
+    }
+    
+    public long getMaster_repair_time() {
+        return master_repair_time;
+    }
+    
+    public long getTotal_repair_time() {
+        return prediction_time + master_repair_time;
+    }
 
     public double getRegression_loss() {
         return regression_loss;
+    }
+    
+    public double getPrediction_regression_loss() {
+        return prediction_regression_loss;
+    }
+
+    /** Normalized repair regression loss (divided by anomaly count to reduce scale effect) */
+    public double getRegression_loss_normalized() {
+        return n_repair_loss_count <= 0 ? 0.0 : regression_loss / n_repair_loss_count;
+    }
+
+    /** Normalized prediction regression loss (divided by anomaly count to reduce scale effect) */
+    public double getPrediction_regression_loss_normalized() {
+        return n_prediction_loss_count <= 0 ? 0.0 : prediction_regression_loss / n_prediction_loss_count;
     }
 }
