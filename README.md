@@ -1,4 +1,4 @@
-# ARM: Auto-Regression Model and domain constraints
+# ARM: Auto-Regression Model and Domain Constraints Data Repairer
 
 Anomaly detection and error repair for **multivariate time series** using master data. The method combines auto-regressive prediction with k-NN search over master data to detect and repair anomalies.
 
